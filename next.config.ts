@@ -6,6 +6,8 @@ const isApk = process.env.BUILD_TARGET === "apk";
 
 const nextConfig: NextConfig = {
   output: isApk ? "export" : undefined,
+  // Builds straight into out/, so an APK build works while `npm run dev` holds .next.
+  distDir: isApk ? "out" : undefined,
   // Partial prerendering needs a server, so static export refuses both.
   cacheComponents: !isApk,
   partialPrefetching: !isApk,
