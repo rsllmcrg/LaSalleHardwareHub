@@ -7,7 +7,9 @@ import {
   filterProducts,
   formatPesos,
   isLowStock,
+  orderTotal,
   parsePesos,
+  receiveOrder,
 } from "./pos.ts";
 
 const hammer = { id: "h", name: "Hammer", priceCents: 35000, stock: 10 };
@@ -109,4 +111,15 @@ test("checkout skips cart items that were deleted from the product list", () => 
     ["h"],
   );
   assert.equal(sale.totalCents, 35000);
+});
+
+test("receiveOrder adds stock and updates cost", () => {
+  const lines = [{ productId: "h", name: "Hammer", qty: 5, costCents: 26000 }];
+  const order = { id: "o1", number: 1, supplier: "Ace", createdAt: "", status: "pending", lines, totalCents: orderTotal(lines) };
+  assert.equal(order.totalCents, 130000);
+  const [h, n] = receiveOrder([{ ...hammer, costCents: 25000 }, { ...nails, costCents: null }], order);
+  assert.equal(h.stock, 15);
+  assert.equal(h.costCents, 26000);
+  assert.equal(n.stock, 4);
+  assert.equal(n.costCents, null);
 });

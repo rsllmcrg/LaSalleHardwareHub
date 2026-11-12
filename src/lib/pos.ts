@@ -31,6 +31,8 @@ export type Product = {
   category: Category;
   // A bundled picture path or an uploaded photo as a data URL.
   image: string | null;
+  // What the shop pays per item; null until the owner enters it.
+  costCents: number | null;
 };
 
 export type SaleLine = {
@@ -38,6 +40,9 @@ export type SaleLine = {
   name: string;
   priceCents: number;
   qty: number;
+  // The cost when it was sold, so later cost changes don't rewrite past profit.
+  // Missing on sales made before costs were tracked.
+  costCents?: number | null;
 };
 
 export type Sale = {
@@ -99,6 +104,7 @@ export function cartLines(products: Product[], cart: Cart): SaleLine[] {
         name: product.name,
         priceCents: product.priceCents,
         qty,
+        costCents: product.costCents,
       },
     ];
   });
@@ -164,4 +170,59 @@ export function checkout(input: CheckoutInput) {
       stock: product.stock - (cart[product.id] ?? 0),
     })),
   };
+}
+
+export const EXPENSE_CATEGORIES = [
+  "Rent",
+  "Electricity",
+  "Water",
+  "Salaries",
+  "Supplies",
+  "Transport",
+  "Other",
+] as const;
+
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+export type Expense = {
+  id: string;
+  // A local calendar date, YYYY-MM-DD.
+  date: string;
+  category: ExpenseCategory;
+  description: string;
+  amountCents: number;
+};
+
+export type OrderLine = {
+  productId: string;
+  name: string;
+  qty: number;
+  costCents: number;
+};
+
+export type PurchaseOrder = {
+  id: string;
+  number: number;
+  supplier: string;
+  createdAt: string;
+  status: "pending" | "received" | "cancelled";
+  lines: OrderLine[];
+  totalCents: number;
+};
+
+export function orderTotal(lines: OrderLine[]): number {
+  return lines.reduce((sum, line) => sum + line.costCents * line.qty, 0);
+}
+
+// Receiving adds the ordered stock and takes the order's cost as the new cost price.
+export function receiveOrder(products: Product[], order: PurchaseOrder): Product[] {
+  return products.map((product) => {
+    const lines = order.lines.filter((l) => l.productId === product.id);
+    if (lines.length === 0) return product;
+    return {
+      ...product,
+      stock: product.stock + lines.reduce((sum, l) => sum + l.qty, 0),
+      costCents: lines.at(-1)!.costCents,
+    };
+  });
 }

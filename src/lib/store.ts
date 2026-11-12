@@ -1,5 +1,16 @@
 import { useSyncExternalStore } from "react";
-import { checkout, type Cart, type Product, type Sale, type User } from "./pos";
+import {
+  checkout,
+  orderTotal,
+  receiveOrder,
+  type Cart,
+  type Expense,
+  type OrderLine,
+  type Product,
+  type PurchaseOrder,
+  type Sale,
+  type User,
+} from "./pos";
 
 const STORAGE_KEY = "lasalle-hardware-hub.v1";
 const PBKDF2_ITERATIONS = 100_000;
@@ -9,13 +20,15 @@ type StoreData = {
   users: User[];
   products: Product[];
   sales: Sale[];
+  expenses: Expense[];
+  purchaseOrders: PurchaseOrder[];
   // Missing on stores saved before the extra sample products were added.
   sampleVersion?: number;
 };
 
 export type Snapshot = StoreData & { session: User | null };
 
-const FIRST_SAMPLE_PRODUCTS: Omit<Product, "id">[] = [
+const FIRST_SAMPLE_PRODUCTS: Omit<Product, "id" | "costCents">[] = [
   {
     name: "Claw Hammer 16oz",
     priceCents: 35000,
@@ -75,7 +88,7 @@ const FIRST_SAMPLE_PRODUCTS: Omit<Product, "id">[] = [
 ];
 
 // Added after the first release; stores saved before then get these once.
-const MORE_SAMPLE_PRODUCTS: Omit<Product, "id">[] = [
+const MORE_SAMPLE_PRODUCTS: Omit<Product, "id" | "costCents">[] = [
   {
     name: "Adjustable Wrench 10in",
     priceCents: 32000,
@@ -197,14 +210,25 @@ const MORE_SAMPLE_PRODUCTS: Omit<Product, "id">[] = [
   },
 ];
 
+// Sample cost prices: about 70% of the selling price, rounded to the peso.
+function sampleCost(priceCents: number) {
+  return Math.round((priceCents * 0.7) / 100) * 100;
+}
+
 const SAMPLE_PRODUCTS = [...FIRST_SAMPLE_PRODUCTS, ...MORE_SAMPLE_PRODUCTS];
 const SAMPLE_VERSION = 2;
 
 function seedData(): StoreData {
   return {
     users: [],
-    products: SAMPLE_PRODUCTS.map((p) => ({ ...p, id: crypto.randomUUID() })),
+    products: SAMPLE_PRODUCTS.map((p) => ({
+      ...p,
+      costCents: sampleCost(p.priceCents),
+      id: crypto.randomUUID(),
+    })),
     sales: [],
+    expenses: [],
+    purchaseOrders: [],
     sampleVersion: SAMPLE_VERSION,
   };
 }
@@ -217,7 +241,7 @@ function addMoreSamples(data: StoreData): StoreData {
     products: [
       ...data.products,
       ...MORE_SAMPLE_PRODUCTS.filter((s) => !names.has(s.name.toLowerCase())).map(
-        (s) => ({ ...s, id: crypto.randomUUID() }),
+        (s) => ({ ...s, costCents: sampleCost(s.priceCents), id: crypto.randomUUID() }),
       ),
     ],
     sampleVersion: SAMPLE_VERSION,
@@ -231,13 +255,15 @@ function addMoreSamples(data: StoreData): StoreData {
   return next;
 }
 
-// Products saved before categories and photos existed get them filled in here.
-function withCategoryAndImage(
-  product: Omit<Product, "category" | "image"> & Partial<Product>,
+// Products saved before categories, photos and costs existed get them filled in here.
+function withSavedDefaults(
+  product: Omit<Product, "category" | "image" | "costCents"> & Partial<Product>,
 ): Product {
   const sample = SAMPLE_PRODUCTS.find((s) => s.name === product.name);
   return {
     category: sample?.category ?? "Other",
+    // An unchanged sample price means the sample cost still fits it.
+    costCents: sample?.priceCents === product.priceCents ? sampleCost(sample.priceCents) : null,
     ...product,
     // The sample pictures were drawings saved as .svg before they became photos.
     image: product.image?.replace(/\.svg$/, ".jpg") ?? sample?.image ?? null,
@@ -249,7 +275,13 @@ function readData(): StoreData {
   if (!raw) return seedData();
   try {
     const parsed = JSON.parse(raw) as StoreData;
-    const data = { ...parsed, products: parsed.products.map(withCategoryAndImage) };
+    const data = {
+      ...parsed,
+      products: parsed.products.map(withSavedDefaults),
+      // Stores saved before expenses and purchase orders existed have neither list.
+      expenses: parsed.expenses ?? [],
+      purchaseOrders: parsed.purchaseOrders ?? [],
+    };
     return (data.sampleVersion ?? 1) < SAMPLE_VERSION ? addMoreSamples(data) : data;
   } catch {
     // Keep the unreadable copy so a corrupted save can still be recovered by hand.
@@ -444,4 +476,66 @@ export function completeSale(
     };
   });
   return sale!;
+}
+
+export function addExpense(fields: Omit<Expense, "id">) {
+  const description = fields.description.trim();
+  if (!description) throw new Error("Enter what the expense was for.");
+  write((data) => ({
+    ...data,
+    expenses: [...data.expenses, { ...fields, description, id: crypto.randomUUID() }],
+  }));
+}
+
+export function deleteExpense(id: string) {
+  write((data) => ({
+    ...data,
+    expenses: data.expenses.filter((e) => e.id !== id),
+  }));
+}
+
+export function createPurchaseOrder(supplier: string, lines: OrderLine[]) {
+  const name = supplier.trim();
+  if (!name) throw new Error("Enter the supplier's name.");
+  if (lines.length === 0) throw new Error("Add at least one product to the order.");
+  write((data) => ({
+    ...data,
+    purchaseOrders: [
+      ...data.purchaseOrders,
+      {
+        id: crypto.randomUUID(),
+        number: (data.purchaseOrders.at(-1)?.number ?? 0) + 1,
+        supplier: name,
+        createdAt: new Date().toISOString(),
+        status: "pending",
+        lines,
+        totalCents: orderTotal(lines),
+      },
+    ],
+  }));
+}
+
+export function receivePurchaseOrder(id: string) {
+  write((data) => {
+    const order = data.purchaseOrders.find((o) => o.id === id);
+    if (!order || order.status !== "pending") {
+      throw new Error("That order is no longer pending.");
+    }
+    return {
+      ...data,
+      products: receiveOrder(data.products, order),
+      purchaseOrders: data.purchaseOrders.map((o) =>
+        o.id === id ? { ...o, status: "received" } : o,
+      ),
+    };
+  });
+}
+
+export function cancelPurchaseOrder(id: string) {
+  write((data) => ({
+    ...data,
+    purchaseOrders: data.purchaseOrders.map((o) =>
+      o.id === id && o.status === "pending" ? { ...o, status: "cancelled" } : o,
+    ),
+  }));
 }

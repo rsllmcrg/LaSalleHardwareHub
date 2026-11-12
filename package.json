@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test src/lib/pos.test.mjs",
+    "test": "node --test src/lib/pos.test.mjs src/lib/dashboard.test.mjs",
     "apk": "node scripts/build-apk.mjs"
   },
   "dependencies": {

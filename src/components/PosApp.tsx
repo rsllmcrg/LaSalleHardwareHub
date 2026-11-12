@@ -4,24 +4,31 @@ import { useState } from "react";
 import { isLowStock, type Cart } from "@/lib/pos";
 import { logout, useStore } from "@/lib/store";
 import AuthScreen from "./AuthScreen";
+import DashboardView from "./DashboardView";
+import ExpensesView from "./ExpensesView";
 import Logo from "./Logo";
+import OrdersView from "./OrdersView";
 import ProductsView from "./ProductsView";
 import SalesView from "./SalesView";
 import SellView from "./SellView";
 import UsersView from "./UsersView";
 
-type View = "sell" | "products" | "sales" | "users";
+type View = "dashboard" | "sell" | "products" | "orders" | "expenses" | "sales" | "users";
 
 const VIEWS: { id: View; label: string; ownerOnly: boolean }[] = [
+  { id: "dashboard", label: "Dashboard", ownerOnly: true },
   { id: "sell", label: "Sell", ownerOnly: false },
   { id: "products", label: "Products", ownerOnly: false },
+  { id: "orders", label: "Orders", ownerOnly: true },
+  { id: "expenses", label: "Expenses", ownerOnly: true },
   { id: "sales", label: "Sales", ownerOnly: true },
   { id: "users", label: "Users", ownerOnly: true },
 ];
 
 export default function PosApp() {
   const store = useStore();
-  const [view, setView] = useState<View>("sell");
+  // Null until someone picks a tab, so each role lands on its own home screen.
+  const [chosenView, setView] = useState<View | null>(null);
   const [cart, setCart] = useState<Cart>({});
 
   if (!store) return null;
@@ -30,10 +37,11 @@ export default function PosApp() {
   }
 
   const isOwner = store.session.role === "owner";
+  const view = chosenView ?? (isOwner ? "dashboard" : "sell");
   const lowStock = store.products.filter(isLowStock);
 
   function handleLogout() {
-    setView("sell");
+    setView(null);
     setCart({});
     logout();
   }
@@ -82,12 +90,25 @@ export default function PosApp() {
             Low stock: {lowStock.map((p) => `${p.name} (${p.stock})`).join(", ")}
           </p>
         )}
+        {view === "dashboard" && (
+          <DashboardView
+            sales={store.sales}
+            products={store.products}
+            expenses={store.expenses}
+            orders={store.purchaseOrders}
+            onOpen={setView}
+          />
+        )}
         {view === "sell" && (
           <SellView products={store.products} cart={cart} setCart={setCart} />
         )}
         {view === "products" && (
           <ProductsView products={store.products} canManage={isOwner} />
         )}
+        {view === "orders" && (
+          <OrdersView products={store.products} orders={store.purchaseOrders} />
+        )}
+        {view === "expenses" && <ExpensesView expenses={store.expenses} />}
         {view === "sales" && <SalesView sales={store.sales} />}
         {view === "users" && <UsersView users={store.users} />}
       </main>

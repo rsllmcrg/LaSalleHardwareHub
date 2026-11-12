@@ -36,6 +36,9 @@ function ProductForm({
   const [price, setPrice] = useState(
     product ? (product.priceCents / 100).toFixed(2) : "",
   );
+  const [cost, setCost] = useState(
+    product?.costCents != null ? (product.costCents / 100).toFixed(2) : "",
+  );
   const [stock, setStock] = useState(product ? String(product.stock) : "");
   const [category, setCategory] = useState<Category>(
     product?.category ?? "Tools",
@@ -62,13 +65,19 @@ function ProductForm({
       setError("Enter a valid price, like 350 or 350.50.");
       return;
     }
+    // Cost is optional; without it the item is left out of profit.
+    const costCents = cost.trim() === "" ? null : parsePesos(cost);
+    if (cost.trim() !== "" && costCents === null) {
+      setError("Enter a valid cost, like 245 or 245.50, or leave it empty.");
+      return;
+    }
     if (!/^\d{1,6}$/.test(stock.trim())) {
       setError("Stock must be a whole number.");
       return;
     }
     try {
       saveProduct(
-        { name, priceCents, stock: Number(stock), category, image },
+        { name, priceCents, costCents, stock: Number(stock), category, image },
         product?.id ?? null,
       );
       onDone();
@@ -81,7 +90,7 @@ function ProductForm({
     <form
       onSubmit={handleSubmit}
       aria-label={product ? "Edit product" : "Add product"}
-      className={`${cardClass} grid gap-3 sm:grid-cols-[1fr_9rem_7rem]`}
+      className={`${cardClass} grid gap-3 sm:grid-cols-[1fr_8rem_8rem_7rem]`}
     >
       <label className="flex flex-col gap-1 text-sm font-medium">
         Name
@@ -101,6 +110,16 @@ function ProductForm({
           value={price}
           onChange={(e) => setPrice(e.target.value)}
           required
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-sm font-medium">
+        Cost (₱)
+        <input
+          className={inputClass}
+          inputMode="decimal"
+          placeholder="Optional"
+          value={cost}
+          onChange={(e) => setCost(e.target.value)}
         />
       </label>
       <label className="flex flex-col gap-1 text-sm font-medium">
@@ -125,7 +144,7 @@ function ProductForm({
           ))}
         </select>
       </label>
-      <div className="flex items-center gap-3 sm:col-span-2">
+      <div className="flex items-center gap-3 sm:col-span-3">
         <ProductImage image={image} className="size-16 shrink-0" />
         <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium">
           Photo
@@ -146,8 +165,8 @@ function ProductForm({
           </button>
         )}
       </div>
-      {error && <p className={`${errorClass} sm:col-span-3`}>{error}</p>}
-      <div className="flex gap-2 sm:col-span-3">
+      {error && <p className={`${errorClass} sm:col-span-4`}>{error}</p>}
+      <div className="flex gap-2 sm:col-span-4">
         <button className={primaryButtonClass}>Save</button>
         <button
           type="button"
@@ -231,6 +250,8 @@ export default function ProductsView({
               <p className="font-medium">{product.name}</p>
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
                 {formatPesos(product.priceCents)} · {product.category}
+                {canManage &&
+                  ` · Cost ${product.costCents === null ? "not set" : formatPesos(product.costCents)}`}
               </p>
             </div>
             <span
